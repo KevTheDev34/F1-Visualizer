@@ -30,6 +30,12 @@ def get_session_data(year: int, grand_prix: str, session_type: str):
 
     session.load()  # Load the session data
 
+    podium = (
+        session.results[session.results['Position'].isin([1, 2, 3])]
+        .sort_values('Position')[['Position', 'Abbreviation', 'FullName', 'TeamName']]
+        .reset_index(drop=True)
+    )
+
     laps = session.laps
     laps = laps[laps['LapNumber'] != 1] # first lap not valid because of starting from grid times
     laps = laps[laps['PitInTime'].isna()]
@@ -90,7 +96,7 @@ def get_session_data(year: int, grand_prix: str, session_type: str):
     features = features.dropna()
 
     if features.empty:
-        return features, sector_medians.iloc[0:0], tire_profile, excluded_drivers
+        return features, sector_medians.iloc[0:0], tire_profile, excluded_drivers, podium
 
     scaler = StandardScaler()
     scaled_features = scaler.fit_transform(features)
@@ -102,7 +108,7 @@ def get_session_data(year: int, grand_prix: str, session_type: str):
     features['Cluster'] = cluster_labels
     sector_medians = sector_medians.join(features[['Cluster']], how='inner')
 
-    return features, sector_medians, tire_profile, excluded_drivers
+    return features, sector_medians, tire_profile, excluded_drivers, podium
 
 def fit_degradation(group: pd.DataFrame) -> pd.Series:
     """
@@ -325,7 +331,14 @@ if submitted:
 
 if st.session_state.get('show_results'):
     with st.spinner('Loading data and performing clustering...'):
-        features, sector_medians, tire_profile, excluded_drivers = get_session_data(year, race, 'Race')
+        features, sector_medians, tire_profile, excluded_drivers, podium = get_session_data(year, race, 'Race')
+
+        st.subheader("Podium")
+        podium_cols = st.columns(3)
+        for i, (_, row) in enumerate(podium.iterrows()):
+            with podium_cols[i]:
+                st.markdown(f"**P{int(row['Position'])}: {row['Abbreviation']}**")
+                st.caption(f"{row['FullName']} — {row['TeamName']}")
 
         if excluded_drivers:
             st.info(f"{len(excluded_drivers)} drivers excluded for insufficient data: {', '.join(excluded_drivers)}")
@@ -342,7 +355,7 @@ if st.session_state.get('show_results'):
 
         cluster_ids = sorted(features['Cluster'].unique())
         st.caption(
-            "Tire degradation bars show seconds gained per lap of tire life. "
+            "Tire degradation bars (bottom of each card) show seconds gained per lap of tire life. "
             "Positive bars mean the tires are degrading; negative bars usually reflect fuel burn-off or "
             "track evolution rather than the tire actually improving."
         )
@@ -392,6 +405,14 @@ if st.session_state.get('show_results'):
             st.dataframe(features.sort_values('Cluster'))
 
         st.subheader("Sector Discrimination")
+        st.caption(
+            "F-ratio measures how strongly each sector separates the clusters: "
+            "between-cluster variance divided by within-cluster variance. "
+            "A high F means the clusters differ a lot in that sector relative to their internal spread "
+            "(that sector is a strong discriminator); a low F means the clusters perform similarly there. "
+            "The cluster-means table below shows each cluster's median time per sector — compare them along "
+            "the highest-F sector to see where the behavioral split actually shows up on track."
+        )
         F_ratio, cluster_sector_means = compute_F_ratio(sector_medians)
 
         sector_name_map = {'s1_median': 'Sector 1', 's2_median': 'Sector 2', 's3_median': 'Sector 3'}
