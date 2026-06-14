@@ -279,6 +279,10 @@ def get_cluster_labels(summary: dict) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
+        # Claude often wraps JSON in ```json ... ``` fences despite instructions.
+        # Slice between the first { and last } to tolerate fences or prose.
+        if '{' in text and '}' in text:
+            text = text[text.find('{'):text.rfind('}') + 1]
         parsed = json.loads(text)
         return {int(k): v for k, v in parsed.items()}
     except Exception as e:
@@ -337,6 +341,11 @@ if st.session_state.get('show_results'):
         cluster_labels = get_cluster_labels(summary)
 
         cluster_ids = sorted(features['Cluster'].unique())
+        st.caption(
+            "Tire degradation bars show seconds gained per lap of tire life. "
+            "Positive bars mean the tires are degrading; negative bars usually reflect fuel burn-off or "
+            "track evolution rather than the tire actually improving."
+        )
         cols = st.columns(len(cluster_ids))
 
         for cluster_id, col in zip(cluster_ids, cols):
