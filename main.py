@@ -318,11 +318,12 @@ def get_cluster_labels(summary: dict) -> dict:
 
 st.title('F1 Driver Clustering')
 st.write('This app clusters F1 drivers based on their performance in a given session')
-with st.sidebar.form("race_selector"):
+with st.sidebar:
     year = st.selectbox("Season", [2022, 2023, 2024, 2025])
     races = get_races(year)
-    race = st.selectbox("Race", races)
-    submitted = st.form_submit_button("Load race")
+    with st.form("race_selector"):
+        race = st.selectbox("Race", races)
+        submitted = st.form_submit_button("Load race")
 
 if submitted:
     st.session_state.show_results = True
@@ -354,6 +355,13 @@ if st.session_state.get('show_results'):
         cluster_labels = get_cluster_labels(summary)
 
         cluster_ids = sorted(features['Cluster'].unique())
+        st.caption(
+            "Each cluster card shows three pace metrics (Median Pace, Pace Std Dev, Best Lap Delta) "
+            "with an arrow and a delta in seconds. The delta is the cluster's mean minus the field mean "
+            "across all clusters — a down arrow means the cluster sits below the field average for that "
+            "metric, an up arrow means above. For Median Pace, below is faster (shown in green); for the "
+            "other two, the arrow color is neutral since neither direction is strictly 'better'."
+        )
         st.caption(
             "Tire degradation bars (bottom of each card) show seconds gained per lap of tire life. "
             "Positive bars mean the tires are degrading; negative bars usually reflect fuel burn-off or "
