@@ -6,15 +6,16 @@ Build a Streamlit dashboard that clusters F1 drivers in a given race by behavior
 ## Done
 - Pipeline: FastF1 session load → clean-lap filter → per-driver feature matrix → StandardScaler → AgglomerativeClustering with dendrogram visualization.
 - Per-compound tire degradation slopes folded into the feature matrix (field-median imputation for missing compounds; `min_stint_laps=10`).
-- Cluster cards render three pace metrics (Median Pace, Pace Std Dev, Best Lap Delta) as `st.metric` with delta vs. field mean — Median Pace uses `delta_color="inverse"` so green = faster; the other two are neutral.
+- Cluster cards render one headline metric (Median Pace) as `st.metric` with delta vs. field mean and `delta_color="inverse"` (green = faster). Pace Std Dev / Best Lap Delta were dropped from the card but remain in the driver-level table. The metric explanation now lives in a `help=` tooltip, not a caption.
 - Tire-degradation bars per cluster (seconds gained per lap of tire life).
-- Caption above the cluster grid explains what the arrows/deltas mean and what positive/negative tire-deg bars represent.
 - LLM cluster naming via Anthropic SDK (`claude-haiku-4-5-20251001`), cached with `@st.cache_data` keyed on the summary dict.
+- Rule-based naming fallback is crash-safe on edge races: `tire_series` replaces the bare `pd.qcut(q=3, labels=[...])`, which raised "Bin labels must be one fewer than the number of bin edges" on <3 clusters or tied cluster means. 1 cluster → `med`, 2 → `low`/`high`, ≥3 → rank-percentile terciles; NaN means default to `med`.
+- Glance-first dashboard layout: Podium → "Driver groups" (slimmed cards) → one collapsed "Details" expander holding the driver-level table, sector discrimination (F-ratio), tire profiles, and the excluded-drivers note. The two explanatory caption walls were removed.
 - Sidebar bug fix: Season selectbox lives outside the form so changing the year triggers an immediate rerun and refreshes the Race list (previously batched inside the form, which suppressed reruns until submit).
 - End-to-end runs verified across multiple race weekends through the LLM step.
 
 ## In progress
-Nothing actively in flight. Last shipped commit on `origin/main` is `8f3bc91 Fix stale race dropdown and document cluster-card metrics`.
+Nothing actively in flight. Latest commit is `1e30e40 Declutter dashboard: glance-first layout`; local `main` is ahead of `origin/main` (unpushed — push when ready).
 
 ## Next (backlog, roughly priority-ordered)
 - **Behavior-over-pace features**
@@ -25,8 +26,11 @@ Nothing actively in flight. Last shipped commit on `origin/main` is `8f3bc91 Fix
 - **Modeling refinements**
   - Fuel-correction for tire degradation slopes so the regression isn't conflating fuel burn-off with tire wear
   - Cross-season same-circuit comparison (e.g., 2023 vs. 2024 vs. 2025 Monza)
+- **LLM provider abstraction**
+  - Add a way to select which LLM provider/model to use for cluster naming (currently hard-coded to Anthropic `claude-haiku-4-5-20251001` — note: the app uses Anthropic, not OpenAI).
+  - Support the open-source GLM-5.2 model as a lower-cost option to reduce paid-API spend. Confirm GLM-5.2 SDK/endpoint details (self-hosted vs. hosted, OpenAI-compatible API?) when implementing.
 - **Robustness**
-  - `qcut` guard for races with <3 viable clusters
+  - `compute_F_ratio` divide-by-zero on a 1-cluster race (`df_between = len(cluster_means) - 1 → 0`) — same "<3 clusters" family as the now-fixed qcut guard, but in the sector-discrimination path.
   - Empty `tire_profile` handling (e.g., fully wet races where a compound never ran)
   - Singleton-cluster unification (decide: merge to nearest, or render as "outlier")
   - Audit `describe_cluster` docstring against current feature set
