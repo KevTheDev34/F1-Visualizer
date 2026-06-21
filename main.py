@@ -250,6 +250,33 @@ def build_cluster_summary(features: pd.DataFrame) -> dict:
     return {'field_means': field_means, 'clusters': clusters}
 
 
+def tier_series(series: pd.Series) -> pd.Series:
+    """
+    Bucket per-cluster means into 'low'/'med'/'high' tiers for describe_cluster.
+
+    Replaces a bare pd.qcut(q=3, labels=[...]) call, which raises
+    "Bin labels must be one fewer than the number of bin edges" whenever there
+    are fewer than 3 clusters or when tied means collapse the quantile bins
+    below 3. This guards both cases:
+      - 1 cluster:  the lone cluster is the field, so tiering is meaningless -> 'med'.
+      - 2 clusters: terciles don't apply -> lower mean 'low', higher 'high'.
+      - >=3:        equal-frequency terciles via rank percentile, tie-safe.
+    A NaN mean (e.g. a missing feature) defaults to the neutral 'med' tier.
+    """
+    n = len(series)
+    if n == 1:
+        tiers = pd.Series('med', index=series.index)
+    elif n == 2:
+        tiers = pd.Series('high', index=series.index)
+        tiers[series <= series.min()] = 'low'
+    else:
+        pct = series.rank(method='first', pct=True)
+        tiers = pct.apply(
+            lambda p: 'low' if p <= 1 / 3 else ('med' if p <= 2 / 3 else 'high')
+        )
+    return tiers.mask(series.isna(), 'med')
+
+
 @st.cache_data
 def get_cluster_labels(summary: dict) -> dict:
     """
@@ -299,9 +326,9 @@ def get_cluster_labels(summary: dict) -> dict:
             {cid: c['means'] for cid, c in summary['clusters'].items()}
         ).T
         tiers = pd.DataFrame({
-            'pace': pd.qcut(cluster_means_df['median_pace'], q=3, labels=['low', 'med', 'high'], duplicates='drop'),
-            'std': pd.qcut(cluster_means_df['pace_std'], q=3, labels=['low', 'med', 'high'], duplicates='drop'),
-            'delta': pd.qcut(cluster_means_df['best_lap_delta'], q=3, labels=['low', 'med', 'high'], duplicates='drop'),
+            'pace': tier_series(cluster_means_df['median_pace']),
+            'std': tier_series(cluster_means_df['pace_std']),
+            'delta': tier_series(cluster_means_df['best_lap_delta']),
         })
         return {
             cid: {
