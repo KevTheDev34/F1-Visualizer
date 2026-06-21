@@ -368,9 +368,6 @@ if st.session_state.get('show_results'):
                 st.markdown(f"**P{int(row['Position'])}: {row['Abbreviation']}**")
                 st.caption(f"{row['FullName']} — {row['TeamName']}")
 
-        if excluded_drivers:
-            st.info(f"{len(excluded_drivers)} drivers excluded for insufficient data: {', '.join(excluded_drivers)}")
-
         if features.empty:
             st.warning(
                 "No drivers had complete data across all three compounds. "
@@ -382,17 +379,10 @@ if st.session_state.get('show_results'):
         cluster_labels = get_cluster_labels(summary)
 
         cluster_ids = sorted(features['Cluster'].unique())
+        st.subheader("Driver groups")
         st.caption(
-            "Each cluster card shows three pace metrics (Median Pace, Pace Std Dev, Best Lap Delta) "
-            "with an arrow and a delta in seconds. The delta is the cluster's mean minus the field mean "
-            "across all clusters — a down arrow means the cluster sits below the field average for that "
-            "metric, an up arrow means above. For Median Pace, below is faster (shown in green); for the "
-            "other two, the arrow color is neutral since neither direction is strictly 'better'."
-        )
-        st.caption(
-            "Tire degradation bars (bottom of each card) show seconds gained per lap of tire life. "
-            "Positive bars mean the tires are degrading; negative bars usually reflect fuel burn-off or "
-            "track evolution rather than the tire actually improving."
+            "Drivers grouped by similar race behavior (pace + tire wear). Each card shows the "
+            "group's median pace vs. the field; the bars show tire wear per lap."
         )
         cols = st.columns(len(cluster_ids))
 
@@ -410,9 +400,13 @@ if st.session_state.get('show_results'):
                     st.markdown(f"*{description}*")
                 st.write(f"{len(members)} drivers")
                 st.write(", ".join(members.index.tolist()))
-                st.metric(label="Median Pace", value=f"{field_mean['median_pace']:.2f}s", delta=f"{field_mean['median_pace'] - features['median_pace'].mean():.2f}s", delta_color="inverse")
-                st.metric(label="Pace Std Dev", value=f"{field_mean['pace_std']:.2f}s", delta=f"{field_mean['pace_std'] - features['pace_std'].mean():.2f}s", delta_color="off")
-                st.metric(label="Best Lap Delta", value=f"{field_mean['best_lap_delta']:.2f}s", delta=f"{field_mean['best_lap_delta'] - features['best_lap_delta'].mean():.2f}s", delta_color="off")
+                st.metric(
+                    label="Median Pace",
+                    value=f"{field_mean['median_pace']:.2f}s",
+                    delta=f"{field_mean['median_pace'] - features['median_pace'].mean():.2f}s",
+                    delta_color="inverse",
+                    help="Group's median lap time. Delta is seconds vs. the field average — green means the group was faster than the field.",
+                )
 
                 tire_label = {'deg_soft': 'Soft', 'deg_medium': 'Medium', 'deg_hard': 'Hard'}
                 tire_color = {'deg_soft': '#DA291C', 'deg_medium': '#F7C53F', 'deg_hard': '#DCDCDC'}
@@ -436,40 +430,41 @@ if st.session_state.get('show_results'):
                     st.pyplot(fig)
                     plt.close(fig)
                 
-        with st.expander("Show driver-level data", expanded=False):
+        with st.expander("Details", expanded=False):
+            if excluded_drivers:
+                st.caption(
+                    f"{len(excluded_drivers)} drivers excluded for insufficient data: "
+                    f"{', '.join(excluded_drivers)}"
+                )
+
+            st.markdown("**Driver-level data**")
             st.dataframe(features.sort_values('Cluster'))
 
-        st.subheader("Sector Discrimination")
-        st.caption(
-            "F-ratio measures how strongly each sector separates the clusters: "
-            "between-cluster variance divided by within-cluster variance. "
-            "A high F means the clusters differ a lot in that sector relative to their internal spread "
-            "(that sector is a strong discriminator); a low F means the clusters perform similarly there. "
-            "The cluster-means table below shows each cluster's median time per sector — compare them along "
-            "the highest-F sector to see where the behavioral split actually shows up on track."
-        )
-        F_ratio, cluster_sector_means = compute_F_ratio(sector_medians)
+            st.markdown("**Sector discrimination**")
+            st.caption(
+                "F-ratio measures how strongly each sector separates the clusters "
+                "(between-cluster variance ÷ within-cluster variance). A high F means that sector "
+                "is a strong discriminator; a low F means the clusters perform similarly there. "
+                "The table shows each cluster's median time per sector."
+            )
+            F_ratio, cluster_sector_means = compute_F_ratio(sector_medians)
+            sector_name_map = {'s1_median': 'Sector 1', 's2_median': 'Sector 2', 's3_median': 'Sector 3'}
+            F_ratio = F_ratio.rename(sector_name_map)
+            cluster_sector_means = cluster_sector_means.rename(columns=sector_name_map)
+            st.write(
+                f"F-Ratio: S1: {F_ratio['Sector 1']:.2f} | "
+                f"S2: {F_ratio['Sector 2']:.2f} | "
+                f"S3: {F_ratio['Sector 3']:.2f}"
+            )
+            st.markdown(cluster_sector_means.style.format("{:.2f}").to_html(), unsafe_allow_html=True)
+            winning_sector = F_ratio.idxmax()
+            gap = cluster_sector_means[winning_sector].max() - cluster_sector_means[winning_sector].min()
+            st.metric(
+                label=f"Cluster gap in {winning_sector}",
+                value=f"{gap:.2f}s",
+                delta=f"F = {F_ratio.max():.1f}",
+                delta_color="off",
+            )
 
-        sector_name_map = {'s1_median': 'Sector 1', 's2_median': 'Sector 2', 's3_median': 'Sector 3'}
-        F_ratio = F_ratio.rename(sector_name_map)
-        cluster_sector_means = cluster_sector_means.rename(columns=sector_name_map)
-
-        st.write(
-            f"F-Ratio: S1: {F_ratio['Sector 1']:.2f} | "
-            f"S2: {F_ratio['Sector 2']:.2f} | "
-            f"S3: {F_ratio['Sector 3']:.2f}"
-        )
-        st.write("Cluster Means for Sector Times:")
-        st.markdown(cluster_sector_means.style.format("{:.2f}").to_html(), unsafe_allow_html=True)
-
-        winning_sector = F_ratio.idxmax()
-        gap = cluster_sector_means[winning_sector].max() - cluster_sector_means[winning_sector].min()
-        st.metric(
-            label=f"Cluster gap in {winning_sector}",
-            value=f"{gap:.2f}s",
-            delta=f"F = {F_ratio.max():.1f}",
-            delta_color="off"
-        )
-
-        st.subheader("Tire Profiles")
-        st.dataframe(tire_profile.reset_index())
+            st.markdown("**Tire profiles**")
+            st.dataframe(tire_profile.reset_index())
